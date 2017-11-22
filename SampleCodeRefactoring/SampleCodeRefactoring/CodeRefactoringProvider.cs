@@ -18,44 +18,27 @@ namespace SampleCodeRefactoring
     {
         public sealed override async Task ComputeRefactoringsAsync(CodeRefactoringContext context)
         {
-            // TODO: Replace the following code with your own analysis, generating a CodeAction for each refactoring to offer
-
             var root = await context.Document.GetSyntaxRootAsync(context.CancellationToken).ConfigureAwait(false);
-
-            // Find the node at the selection.
             var node = root.FindNode(context.Span);
 
-            // Only offer a refactoring if the selected node is a type declaration node.
             var typeDecl = node as TypeDeclarationSyntax;
-            if (typeDecl == null)
+            if (typeDecl == null || context.Document.Name.ToLowerInvariant() == typeDecl.Identifier.ToString().ToLowerInvariant() + ".cs")
             {
                 return;
             }
 
-            // For any type declaration node, create a code action to reverse the identifier text.
-            var action = CodeAction.Create("Reverse type name", c => ReverseTypeNameAsync(context.Document, typeDecl, c));
-
-            // Register this code action.
+            var action = CodeAction.Create("Move to file", c => Move(context.Document, typeDecl, root));
             context.RegisterRefactoring(action);
         }
 
-        private async Task<Solution> ReverseTypeNameAsync(Document document, TypeDeclarationSyntax typeDecl, CancellationToken cancellationToken)
+        private Task<Solution> Move(Document document, TypeDeclarationSyntax typeDecl, SyntaxNode root)
         {
-            // Produce a reversed version of the type declaration's identifier token.
-            var identifierToken = typeDecl.Identifier;
-            var newName = new string(identifierToken.Text.ToCharArray().Reverse().ToArray());
+            var newRoot = root.RemoveNode(typeDecl, SyntaxRemoveOptions.AddElasticMarker);
+            var updatedDocument = document.WithSyntaxRoot(newRoot);
 
-            // Get the symbol representing the type to be renamed.
-            var semanticModel = await document.GetSemanticModelAsync(cancellationToken);
-            var typeSymbol = semanticModel.GetDeclaredSymbol(typeDecl, cancellationToken);
+            var newDocument = updatedDocument.Project.AddDocument(typeDecl.Identifier + ".cs", SyntaxFactory.CompilationUnit().AddMembers(typeDecl), updatedDocument.Folders);
 
-            // Produce a new solution that has all references to that type renamed, including the declaration.
-            var originalSolution = document.Project.Solution;
-            var optionSet = originalSolution.Workspace.Options;
-            var newSolution = await Renamer.RenameSymbolAsync(document.Project.Solution, typeSymbol, newName, optionSet, cancellationToken).ConfigureAwait(false);
-
-            // Return the new solution with the now-uppercase type name.
-            return newSolution;
+            return Task.FromResult(newDocument.Project.Solution);
         }
     }
 }
